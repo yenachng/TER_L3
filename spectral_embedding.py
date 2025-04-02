@@ -43,6 +43,7 @@ def fast_eigen_decomp(G, sizetol):
     data["size"] = n
     if n > sizetol:
         k = int(n/20)
+        print(k)
     else:
         k = 20
     print(f"choosing from {k} SM or LM eigenvals")

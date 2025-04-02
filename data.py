@@ -44,3 +44,4 @@ folder = "test_data"
 test_data = load_all_graphs(folder, index_offset=0)  # Set index_offset to -1 if needed
 for filename, graph in test_data.items():
     print(f"Graph {filename}: {graph.number_of_nodes()} nodes, {graph.number_of_edges()} edges")
+

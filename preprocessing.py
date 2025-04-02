@@ -16,9 +16,7 @@ def contract_deg2(G):
         u, w = neighbors[0], neighbors[1]
         if not H.has_edge(u, w):
             H.add_edge(u, w)
-            print(f"added edge ({u}, {w})")
         H.remove_node(v)
-        print(f"removed node {v}")
         for x in (u,w):
             if x in H and H.degree(x) == 2 and x not in candidates:
                 candidates.append(x)
@@ -26,14 +24,15 @@ def contract_deg2(G):
 
 def pad_pendents(G):
     H = G.copy()
-    candidates = [v for v in H.nodes if H.degree(v)<2]
-    if candidates==[]:
-        return H
-    else:
-        for p in candidates:
-            for u in H.nodes():
-                if u !=p and u not in H.neighbors(p):
-                    H.add_edge(p, u)
-                    break
+    pendents = deque([v for v in H.nodes() if H.degree(v) < 2])
+    while pendents:
+        p = pendents.popleft()
+        if H.degree(p) >= 2:
+            continue
+        for u in H.nodes():
+            if u != p and u not in H.neighbors(p):
+                H.add_edge(p, u)
+                break
+        pendents = deque([v for v in H.nodes() if H.degree(v) < 2])
     return H
     

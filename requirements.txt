@@ -1,0 +1,11 @@
+matplotlib
+pandas
+numpy
+scipy
+networkx
+seaborn
+jupyterlab
+notebook
+sympy
+scikit-learn
+graphviz

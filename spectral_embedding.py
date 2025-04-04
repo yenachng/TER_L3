@@ -20,13 +20,36 @@ def compute_normalized(G):
     Q_norm = I + D_inv_sqrt@A@D_inv_sqrt
     return L_norm, Q_norm, n, A
 
+
+
+def projection_lower(A, k, p=10, q=2, random_state = None):
+    n = A.shape[0]
+    if random_state is not None:
+        rng = np.random.RandomState(random_state) if isinstance(random_state, int) else random_state
+    else:
+        rng = np.random
+    O = rng.randn(n,k+p)
+    Y = A.dot(O) if hasattr(A, "dot") else np.dot(A, O)
+    for _ in range(q):
+        Y = A.dot(Y) if hasattr(A, "dot") else np.dot(A,O)
+
+    Q, _ = np.linalg.qr(Y, mode='reduced')
+    B = Q.T.dot(A.dot(Q)) if hasattr(A,"dot") else np.dot(Q.T, np.dot(A,Q))
+    evals, evecs_B = np.linalg.eigh(B)
+    idx = np.argsort(evals)
+    evals = evals[idx]
+    evecs_B = evecs_B[:,idx]
+    evecs = Q.dot(evecs_B[:,:k])
+    evals = evals[:k]
+    return evals, evecs
+
 def eigengaps(eigenvals, method):
     if method=="L":
         print("calculating gaps between normalized laplacian eigenvalues")
-        tol_multiplier = 1
+        tol_multiplier = 1.2
     else:
         print("calculating gaps between normalized signless laplacian eigenvalues")
-        tol_multiplier = 1
+        tol_multiplier = 1.5
     gaps = np.diff(eigenvals)
     gaps_std = np.std(gaps)
     m_gap_indx = np.argmax(gaps)
@@ -42,37 +65,50 @@ def fast_eigen_decomp(G, sizetol):
     L_norm, Q_norm, n, A= compute_normalized(G)
     data["size"] = n
     if n > sizetol:
-        k = int(n/20)
-        print(k)
+        k = int(n / 20)
+        print(f"graph size {n} > {sizetol}: using k = {k} with QR-based approximation")
+        eigvals_L, eigvects_L = projection_lower(L_norm, k, p=10, q=2, random_state=42)
+        eigvals_Q, eigvects_Q = projection_lower(Q_norm, k, p=10, q=2, random_state=42)
+        eigvals_Q = eigvals_Q[::-1]
+        eigvects_Q = eigvects_Q[:, ::-1]
     else:
         k = 20
-    print(f"choosing from {k} SM or LM eigenvals")
-    eigvals_L, eigvects_L = eigsh(L_norm, k, which='SM', tol=1e-4, maxiter=300)
-    eigvals_Q, eigvects_Q = eigsh(Q_norm, k, which='LM', tol=1e-4, maxiter=300)
-    eigvals_Q = eigvals_Q[::-1]
+        print(f"graph size {n} <= {sizetol}: using full dense eigen-decomposition with k = {k}")
+        L_dense = L_norm.toarray() if hasattr(L_norm, "toarray") else L_norm
+        Q_dense = Q_norm.toarray() if hasattr(Q_norm, "toarray") else Q_norm
+        eigvals_L, eigvects_L = np.linalg.eigh(L_dense)
+        eigvals_Q, eigvects_Q = np.linalg.eigh(Q_dense)
+        idx_desc = np.argsort(eigvals_Q)[::-1]
+        eigvals_Q = eigvals_Q[idx_desc]
+        eigvects_Q = eigvects_Q[:, idx_desc]
 
     max_idx_L, large_gaps_L = eigengaps(eigvals_L[1:], "L")
-    max_idx_Q, large_gaps_Q = eigengaps(eigvals_Q, "Q")
+    _, large_gaps_Q = eigengaps(eigvals_Q, "Q")
     #check importance of max Q
     kL =len(large_gaps_L)
     kQ = len(large_gaps_Q)
-    lam, _ = eigsh(A, k=1, which='LM')
-    spectral_radius = np.real(lam[0])
+    if n > sizetol:
+        lam, _ = eigsh(A, k=1, which='LM', tol=1e-4, maxiter=300)
+        spectral_radius = np.real(lam[0])
+    else:
+        A_dense = A.toarray() if hasattr(A, "toarray") else A
+        lam = np.linalg.eigvals(A_dense)
+        spectral_radius = np.max(np.abs(lam))
     data["spectral_radius"] = spectral_radius
     data["Perron cluster"] = eigvects_Q[:,-1].reshape(-1,1)
     if kL == 1:
-        k = max_idx_L+1
-        data["L_vects"] = eigvects_L[:, 1:k]
-        data["partitions_L"] = k    
+        kL_used = max_idx_L + 1
+        data["L_vects"] = eigvects_L[:, 1:kL_used]
+        data["partitions_L"] = kL_used    
     else:
-        data["L_vects"] = eigvects_L[:,1].reshape(-1,1)
+        data["L_vects"] = eigvects_L[:, 1].reshape(-1, 1)
         data["partitions_L"] = None
-    if kQ > k*0.85:#a changer
+    
+    if kQ > k * 0.85:
         data["partitions_Q"] = None
     else:
         data["partitions_Q"] = kQ
         data["Perron cluster"] = eigvects_Q[:, :-kQ]
-    return data
 
 
 def kmeans_clusters(embedding, k):

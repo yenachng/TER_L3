@@ -3,6 +3,7 @@ import numpy as np
 import random
 from collections import deque
 from multiprocessing import Pool
+from itertools import combinations
 
 import spectral_embedding as spe
 from data import test_data
@@ -40,7 +41,6 @@ def bondy_chvatal_closure(G):
 
 def kelmans_op(G, u, v):
     if not G.has_edge(u,v):
-        print("uv not in E(G), cannot perform kelmans")
         return G.copy()
     H = G.copy()
     for w in list(H.neighbors(u)):
@@ -72,4 +72,6 @@ def select_kelmans_candidate(G):
             best_edge = (v, u)
     return best_edge
 
+def edges_equal(G, H):
+    return set(tuple(sorted(e)) for e in G.edges()) == set(tuple(sorted(e)) for e in H.edges())
 

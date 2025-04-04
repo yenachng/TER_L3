@@ -1,6 +1,9 @@
 import networkx as nx
 import matplotlib.pyplot as plt
 from cluster_refinement import kelmans_op
+from cluster_refinement import edges_equal
+from itertools import combinations
+
 
 
 def draw(G):
@@ -45,3 +48,30 @@ def visualize_kelmans_operation(G, u, v):
     plt.tight_layout()
     plt.show()
 
+
+def test_modifications(G):
+    groups = {"no changes": [], "isomorphic": [], "has_pendent_edge": [], "has_weak_edge": [], "is_disconnected": [], "other": []}
+    for u, v in combinations(G.nodes(), 2):
+        candidate = (u, v) if G.degree(u) > G.degree(v) else (v, u)
+        H = kelmans_op(G, candidate[0], candidate[1])
+        if edges_equal(G, H):
+            groups["no changes"].append(candidate)
+        elif nx.is_isomorphic(G, H):
+            groups["isomorphic"].append(candidate)
+        elif any(deg == 1 for _, deg in H.degree()):
+            groups["has_pendent_edge"].append(candidate)
+        elif list(nx.bridges(H)):
+            groups["has_weak_edge"].append(candidate)
+        elif not nx.is_connected(H):
+            groups["is_disconnected"].append(candidate)
+        else:
+            groups["other"].append(candidate)
+    for group, candidates in groups.items():
+        if group == "has_pendent_edge" or group == "has_weak_edge" or group=="is disconnected":
+            for candidate in candidates:
+                u,v = candidate
+                print(f"shift {u} -> {v}, modification type: {group}")
+                visualize_kelmans_operation(G, candidate[0], candidate[1])
+        else:
+            print(f"{group}: {candidates}")
+# need to add large graph drawing fct

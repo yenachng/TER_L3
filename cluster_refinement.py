@@ -72,6 +72,25 @@ def select_kelmans_candidate(G):
             best_edge = (v, u)
     return best_edge
 
+def all_modifications(G):
+    groups = {"no changes": 0, "isomorphic": 0, "has_pendent_edge": 0, "has_weak_edge": 0, "is_disconnected": 0, "other": 0}
+    for u, v in combinations(G.nodes(), 2):
+        candidate = (u, v) if G.degree(u) > G.degree(v) else (v, u)
+        H = kelmans_op(G, candidate[0], candidate[1])
+        if edges_equal(G, H):
+            groups["no changes"]+=1
+        elif nx.is_isomorphic(G, H):
+            groups["isomorphic"]+=1
+        elif any(deg == 1 for _, deg in H.degree()):
+            groups["has_pendent_edge"]+=1
+        elif list(nx.bridges(H)):
+            groups["has_weak_edge"]+=1
+        elif not nx.is_connected(H):
+            groups["is_disconnected"]+=1
+        else:
+            groups["other"]+=1
+    return groups
+
 def edges_equal(G, H):
     return set(tuple(sorted(e)) for e in G.edges()) == set(tuple(sorted(e)) for e in H.edges())
 

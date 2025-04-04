@@ -20,7 +20,20 @@ def compute_normalized(G):
     Q_norm = I + D_inv_sqrt@A@D_inv_sqrt
     return L_norm, Q_norm, n, A
 
+def spectral_radius_power(G, max_iter=1000, tol=1e-6):
+    A = nx.adjacency_matrix(G)
+    n = A.shape[0]
+    x = np.random.rand(n)
+    x /= np.linalg.norm(x)
+    for _ in range(max_iter):
+        x_new = A @ x
+        x_new_norm = np.linalg.norm(x_new)
+        x_new /= x_new_norm
 
+        if np.linalg.norm(x - x_new) < tol:
+            break
+        x = x_new
+    return x_new_norm
 
 def projection_lower(A, k, p=10, q=2, random_state = None):
     n = A.shape[0]

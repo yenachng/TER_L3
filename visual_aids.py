@@ -1,7 +1,6 @@
 import networkx as nx
 import matplotlib.pyplot as plt
 from cluster_refinement import kelmans_op
-from cluster_refinement import edges_equal
 from itertools import combinations
 
 

@@ -72,25 +72,59 @@ def select_kelmans_candidate(G):
             best_edge = (v, u)
     return best_edge
 
-def all_modifications(G):
-    groups = {"no changes": 0, "isomorphic": 0, "has_pendent_edge": 0, "has_weak_edge": 0, "is_disconnected": 0, "other": 0}
+
+def all_kelmans_res(G):
+    groups = {
+        "no_effect": [], "structurally_equivalent": [], "disconnecting": [],
+        "cut_edge_introduced": [], "pendent_created": [], "cycle_removed": [],
+        "other": []
+    }
+
+    original_edges = set(tuple(sorted(e)) for e in G.edges())
+    original_cycles = len(nx.cycle_basis(G))
+    G_degrees = dict(G.degree())
+
     for u, v in combinations(G.nodes(), 2):
-        candidate = (u, v) if G.degree(u) > G.degree(v) else (v, u)
-        H = kelmans_op(G, candidate[0], candidate[1])
-        if edges_equal(G, H):
-            groups["no changes"]+=1
-        elif nx.is_isomorphic(G, H):
-            groups["isomorphic"]+=1
-        elif any(deg == 1 for _, deg in H.degree()):
-            groups["has_pendent_edge"]+=1
-        elif list(nx.bridges(H)):
-            groups["has_weak_edge"]+=1
-        elif not nx.is_connected(H):
-            groups["is_disconnected"]+=1
-        else:
-            groups["other"]+=1
+        a, b = (u, v) if G_degrees[u] > G_degrees[v] else (v, u)
+        H = kelmans_op(G, a, b)
+
+        H_edges = set(tuple(sorted(e)) for e in H.edges())
+        if H_edges == original_edges:
+            groups["no_effect"].append((a, b))
+            continue
+
+        if nx.is_isomorphic(G, H):
+            groups["structurally_equivalent"].append((a, b))
+            continue
+
+        if not nx.is_connected(H):
+            groups["disconnecting"].append((a, b))
+            continue
+
+        if any(deg == 1 for _, deg in H.degree()):
+            groups["pendent_created"].append((a, b))
+            continue
+
+        if list(nx.bridges(H)):
+            groups["cut_edge_introduced"].append((a, b))
+            continue
+
+        if len(nx.cycle_basis(H)) < original_cycles:
+            groups["cycle_removed"].append((a, b))
+            continue
+
+        groups["other"].append((a, b))
+
     return groups
 
-def edges_equal(G, H):
-    return set(tuple(sorted(e)) for e in G.edges()) == set(tuple(sorted(e)) for e in H.edges())
+def all_kelmans_show(G, visualize=False):
+    groups = all_kelmans_res(G)
 
+    for group, candidates in groups.items():
+        if group in ("no_effect", "structurally_equivalent"):
+            print(f"{group}: {candidates}")
+        else:
+            for u, v in candidates:
+                print(f"shift {u} → {v}, modification type: {group}")
+                if visualize:
+                    visualize_kelmans_operation(G, u, v)

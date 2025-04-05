@@ -1,7 +1,6 @@
 import networkx as nx
 import numpy as np
 from collections import deque
-import random
 
 def contract_deg2(G):
     H = G.copy()
@@ -24,12 +23,13 @@ def contract_deg2(G):
 
 def pad_pendents(G):
     H = G.copy()
+    valid_nodes = [v for v in H.nodes() if isinstance(v, (int, str, tuple))]
     pendents = deque([v for v in H.nodes() if H.degree(v) < 2])
     while pendents:
         p = pendents.popleft()
         if H.degree(p) >= 2:
             continue
-        for u in H.nodes():
+        for u in valid_nodes:
             if u != p and u not in H.neighbors(p):
                 H.add_edge(p, u)
                 break

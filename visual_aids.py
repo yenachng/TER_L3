@@ -1,15 +1,44 @@
 import networkx as nx
 import matplotlib.pyplot as plt
-from cluster_refinement import kelmans_op
+from cluster_refinement import kelmans_op, bondy_chvatal_closure
 from itertools import combinations
 
 
 
 def draw(G):
     pos = nx.kamada_kawai_layout(G)
-    nx.draw(G, pos, with_labels=True, node_color='lightblue', edge_color='black')
+    nx.draw(G, pos, with_labels=True, node_color='lightblue', edge_color='gray')
     plt.title(f"{G}")
     plt.show()
+
+def largest_clique(G):
+    cliques = list(nx.find_cliques(G))
+    if not cliques:
+        return set()
+    max_size = max(len(c) for c in cliques)
+    for clique in cliques:
+        if len(clique) == max_size:
+            return set(clique)
+
+def draw_original_vs_closed(G):
+    closedG = bondy_chvatal_closure(G)
+    pos_orig = nx.kamada_kawai_layout(G)
+    pos_closed = nx.kamada_kawai_layout(closedG)
+    clique = largest_clique(closedG)
+    
+    fig, axes = plt.subplots(1, 2, figsize=(14, 7))
+    axes[0].set_title(f"G: {G.number_of_edges()} edges")
+    nx.draw(G, pos_orig, with_labels=True, node_color='lightblue', edge_color='gray', ax=axes[0])
+    
+    axes[1].set_title(f"cl(G): {closedG.number_of_edges()} edges")
+    nx.draw(closedG, pos_closed, with_labels=True, node_color='lightblue', edge_color='gray', ax=axes[1])
+    if clique:
+        nx.draw_networkx_nodes(closedG, pos_closed, nodelist=list(clique),
+                               node_color='none', edgecolors='red', linewidths=2, ax=axes[1])
+    
+    plt.tight_layout()
+    plt.show()
+
 
 def visualize_kelmans_operation(G, u, v):
     H = kelmans_op(G, u, v)

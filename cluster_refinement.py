@@ -1,13 +1,19 @@
 import networkx as nx
 import numpy as np
 import random
+import spectral_embedding as se
+import scipy.sparse as sp
+import heapq as hq
+import matplotlib.pyplot as plt
 from collections import deque
-from multiprocessing import Pool
 from itertools import combinations
 
 import spectral_embedding as spe
-from data import test_data
-H = random.choice(list(test_data.values()))
+
+def spectral_radius(G):
+    A = se.computeA(G)
+    val, _ = sp.linalg.eigsh(A, k=1, which='LA')
+    return val[0]
 
 def bondy_chvatal_closure(G):
     n = G.number_of_nodes()
@@ -117,14 +123,187 @@ def all_kelmans_res(G):
 
     return groups
 
-def all_kelmans_show(G, visualize=False):
-    groups = all_kelmans_res(G)
+def cheeger_cut(G):
+    A = se.computeA(G)
+    D = np.diag(A.sum(axis=1))
+    L = D - A
+    _, vecs = sp.linalg.eigsh(L, k=2, which='SM')
+    fiedler = vecs[:, 1]
 
-    for group, candidates in groups.items():
-        if group in ("no_effect", "structurally_equivalent"):
-            print(f"{group}: {candidates}")
+    idx = np.argsort(fiedler)
+    nodes = np.array(G.nodes())[idx]
+    
+    in_S = np.zeros(len(nodes), dtype=bool)
+    vol_S = 0
+    boundary = 0
+    degrees = np.array(A.sum(axis=1)).flatten()
+    
+    min_ratio = np.inf
+    best_cut = set()
+    
+    for i in range(len(nodes) // 2):
+        v = nodes[i]
+        v_idx = list(G.nodes).index(v)
+        in_S[v_idx] = True
+        vol_S += degrees[v_idx]
+
+        for u in G.neighbors(v):
+            u_idx = list(G.nodes).index(u)
+            if in_S[u_idx]:
+                boundary -= 1
+            else:
+                boundary += 1
+
+        if vol_S > 0:
+            ratio = boundary / vol_S
+            if ratio < min_ratio:
+                min_ratio = ratio
+                best_cut = set(nodes[:i+1])
+
+    return min_ratio, best_cut
+
+def boundary_edges(G, cut_set):
+    cut_set = set(cut_set)
+    return [
+        (u, v)
+        for u, v in G.edges()
+        if (u in cut_set) != (v in cut_set)
+    ]
+
+def get_edge_attributes(G, cut_set):
+    deg = dict(G.degree())
+    boundary = {(min(u, v), max(u, v)): (u in cut_set) != (v in cut_set) for u, v in G.edges()}
+    deg_diff = {(min(u, v), max(u, v)): abs(deg[u] - deg[v]) for u, v in G.edges()}
+    return boundary, deg_diff
+
+def combined_edge_priority(e, features, weights, normalize=False):
+    if weights is None:
+        return random.random()
+    key = (min(e[0], e[1]), max(e[0], e[1]))
+    b, d = features['boundary'][key], features['deg_diff'][key]
+    if normalize:
+        d /= max(features['deg_diff'].values()) or 1
+    return weights['boundary'] * int(b) + weights['deg_diff'] * d
+
+def aggressive_pruning_ordered(G, weights, normalize=False):
+    H = G.copy()
+    n = H.number_of_nodes()
+    h, cut = cheeger_cut(G)
+    features = {}
+    features['boundary'], features['deg_diff'] = get_edge_attributes(G, cut)
+    seen, heap = set(), []
+    edge_order = []
+
+    # Initialize the heap with all edges and their priorities.
+    for e in H.edges():
+        prio = combined_edge_priority(e, features, weights, normalize)
+        hq.heappush(heap, (prio, e))
+
+    while heap:
+        _, (u, v) = hq.heappop(heap)
+        eid = (min(u, v), max(u, v))
+        if eid in seen or not H.has_edge(u, v):
+            continue
+        seen.add(eid)
+        if H.degree(u) + H.degree(v) < n + 2:
+            continue
+        H.remove_edge(u, v)
+        edge_order.append(eid)
+        
+        # Update priorities for edges incident to u.
+        for w in H.neighbors(u):
+            ew = (min(u, w), max(u, w))
+            if ew not in seen and H.has_edge(*ew):
+                prio = combined_edge_priority(ew, features, weights, normalize)
+                hq.heappush(heap, (prio, ew))
+        
+        # Update priorities for edges incident to v.
+        for w in H.neighbors(v):
+            ew = (min(v, w), max(v, w))
+            if ew not in seen and H.has_edge(*ew):
+                prio = combined_edge_priority(ew, features, weights, normalize)
+                hq.heappush(heap, (prio, ew))
+
+    return H, edge_order
+
+def variable_orderings(G, visualisation=True):
+    strategies = [
+        {'name': '(1.0, 0.0)', 'weights': {'boundary': 1.0, 'deg_diff': 0.0}},
+        {'name': '(-1.0, 0.0)', 'weights': {'boundary': -1.0, 'deg_diff': 0.0}},
+        {'name': '(0.0, 1.0)', 'weights': {'boundary': 0.0, 'deg_diff': 1.0}},
+        {'name': '(0.0, -1.0)', 'weights': {'boundary': 0.0, 'deg_diff': -1.0}},
+        {'name': '(1.0, 1.0)', 'weights': {'boundary': 1.0, 'deg_diff': 1.0}},
+        {'name': '(-1.0, -1.0)', 'weights': {'boundary': -1.0, 'deg_diff': -1.0}},
+        {'name': 'random', 'weights': None},
+        {'name': 'fiedler', 'weights': None},
+    ]
+
+    results = {}
+    for strat in strategies:
+        name = strat['name']
+        if name == 'random':
+            edges = list(G.edges())
+            random.shuffle(edges)
+            H = G.copy()
+            for u, v in edges:
+                if H.degree(u) + H.degree(v) >= G.number_of_nodes() + 2:
+                    H.remove_edge(u, v)
+        elif name == 'fiedler':
+            L = nx.normalized_laplacian_matrix(G).astype(float)
+            _, vecs = sp.linalg.eigsh(L, k=2, which='SM')
+            fiedler = np.real(vecs[:, 1])
+            node_idx = {node: i for i, node in enumerate(G.nodes())}
+            fiedler_diff = {
+                (min(u, v), max(u, v)): abs(fiedler[node_idx[u]] - fiedler[node_idx[v]])
+                for u, v in G.edges()
+            }
+            weights = fiedler_diff
+            H = G.copy()
+            for u, v in sorted(G.edges(), key=lambda e: weights.get((min(e), max(e)), 0), reverse=True):
+                if H.degree(u) + H.degree(v) >= G.number_of_nodes() + 2:
+                    H.remove_edge(u, v)
         else:
-            for u, v in candidates:
-                print(f"shift {u} → {v}, modification type: {group}")
-                if visualize:
-                    visualize_kelmans_operation(G, u, v)
+            h, cut = cheeger_cut(G)
+            features = get_edge_attributes(G, cut)
+            weights = strat['weights']
+            H = aggressive_pruning_ordered(G, weights, normalize=True)
+
+        h_end, cut_end = cheeger_cut(H)
+        rho = spectral_radius(H)
+        edge_count = H.number_of_edges()
+
+        results[name] = {
+            'cheeger': h_end,
+            'spectral_radius': rho,
+            'edge_count': edge_count,
+            'graph': H,
+            'cut': cut_end
+        }
+    if visualisation:
+        for name, res in results.items():
+            H = res['graph']
+            cut = res['cut']
+            h = res['cheeger']
+            rho = res['spectral_radius']
+            edge_count = res['edge_count']
+
+            fig, axes = plt.subplots(1, 2, figsize=(12, 5))
+            pos = nx.kamada_kawai_layout(G)
+            pos_H = nx.kamada_kawai_layout(H)
+            cut_edges_G = [(u, v) for u, v in G.edges() if (u in cut) != (v in cut)]
+            cut_edges_H = [(u, v) for u, v in H.edges() if (u in cut) != (v in cut)]
+
+            nx.draw(G, pos, ax=axes[0], with_labels=True, node_color='lightblue', edge_color='gray')
+            nx.draw_networkx_edges(G, pos, edgelist=cut_edges_G, edge_color='pink', style= '-',width=1, ax=axes[0])
+            axes[0].set_title("original\n"
+                            f"edges = {len(edges)}")
+            axes[0].axis('off')
+
+            nx.draw(H, pos_H, ax=axes[1], with_labels=True, node_color='lightgreen', edge_color='gray')
+            nx.draw_networkx_edges(H, pos_H, edgelist=cut_edges_H, edge_color='orange', width=1, ax=axes[1])
+            axes[1].set_title(f"{name}\ncheeger ≈ {h:.4f}, ρ ≈ {rho:.4f}, edges = {edge_count}")
+            axes[1].axis('off')
+
+            plt.tight_layout()
+            plt.show()
+    return results

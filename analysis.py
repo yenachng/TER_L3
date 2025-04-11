@@ -4,7 +4,6 @@ from collections import defaultdict
 from itertools import combinations
 import concurrent.futures
 import cluster_refinement as refine
-import numpy as np
 
 DEBUG = False
 
@@ -27,13 +26,11 @@ def kelmans_op(G, u, v):
 
 def analyze_pair(args):
     G, u, v, original_edges, original_cycles, degrees, orig_cheeger, orig_spectral = args
-    # Order nodes by degree.
     a, b = (u, v) if degrees[u] > degrees[v] else (v, u)
     
     debug_print(f"analyze_pair: processing pair ({a}, {b}).")
     H = refine.kelmans_op(G, a, b)
-    
-    # Check that node counts remain consistent
+
     if H.number_of_nodes() != G.number_of_nodes():
         debug_print(f"analyze_pair: warning! node count changed from {G.number_of_nodes()} to {H.number_of_nodes()} for pair ({a}, {b}).")
     

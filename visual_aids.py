@@ -1,105 +1,163 @@
 import networkx as nx
 import matplotlib.pyplot as plt
-from cluster_refinement import kelmans_op, bondy_chvatal_closure
-from itertools import combinations
+import numpy as np
+from cluster_refinement import bondy_chvatal_closure, cheeger_cut
+import spectral_embedding as se
 
-
-
-def draw(G):
-    pos = nx.kamada_kawai_layout(G)
-    nx.draw(G, pos, with_labels=True, node_color='lightblue', edge_color='gray')
-    plt.title(f"{G}")
+def draw_graph(g, title=None, node_color='lightblue', edge_color='gray'):
+    pos = nx.kamada_kawai_layout(g)
+    nx.draw(g, pos, with_labels=True, node_color=node_color, edge_color=edge_color)
+    if title is None:
+        title = g.graph.get("name", f"graph: |v|={g.number_of_nodes()}, |e|={g.number_of_edges()}")
+    plt.title(title)
+    plt.axis('off')
     plt.show()
 
-def largest_clique(G):
-    cliques = list(nx.find_cliques(G))
-    if not cliques:
-        return set()
-    max_size = max(len(c) for c in cliques)
-    for clique in cliques:
-        if len(clique) == max_size:
-            return set(clique)
+def draw_graph_summary(g):
+    if "name" in g.graph:
+        title = f"{g.graph['name']} (|e|={g.number_of_edges()})"
+    else:
+        h, _ = cheeger_cut(g)
+        rho = se.spectral_radius(g)
+        title = f"cheeger: {h:.4f} | spectral rad: {rho:.4f} | |e|={g.number_of_edges()}"
+    draw_graph(g, title=title)
 
-def draw_original_vs_closed(G):
-    closedG = bondy_chvatal_closure(G)
-    pos_orig = nx.kamada_kawai_layout(G)
-    pos_closed = nx.kamada_kawai_layout(closedG)
-    clique = largest_clique(closedG)
-    
+def draw_original_vs_closed(g, title=None):
+    closed_g = bondy_chvatal_closure(g)
+    pos_orig = nx.kamada_kawai_layout(g)
+    pos_closed = nx.kamada_kawai_layout(closed_g)
+    clique = se.largest_clique(closed_g)
+    if title is None:
+        title = g.graph.get("name", f"|v|={g.number_of_nodes()}, |e|={g.number_of_edges()}")
     fig, axes = plt.subplots(1, 2, figsize=(14, 7))
-    axes[0].set_title(f"G: {G.number_of_edges()} edges")
-    nx.draw(G, pos_orig, with_labels=True, node_color='lightblue', edge_color='gray', ax=axes[0])
-    
-    axes[1].set_title(f"cl(G): {closedG.number_of_edges()} edges")
-    nx.draw(closedG, pos_closed, with_labels=True, node_color='lightblue', edge_color='gray', ax=axes[1])
+    axes[0].set_title(f"edgecount: {g.number_of_edges()}")
+    nx.draw(g, pos_orig, with_labels=False, node_color='lightblue', edge_color='black', ax=axes[0])
+    axes[1].set_title(f"edgecount: {closed_g.number_of_edges()}")
+    nx.draw(closed_g, pos_closed, with_labels=False, node_color='lightblue', edge_color='black', ax=axes[1])
     if clique:
-        nx.draw_networkx_nodes(closedG, pos_closed, nodelist=list(clique),
-                               node_color='none', edgecolors='red', linewidths=2, ax=axes[1])
-    
+        nx.draw_networkx_nodes(closed_g, pos_closed, nodelist=list(clique),
+                               node_color='none', edgecolors='blue', linewidths=2, ax=axes[1])
+    plt.suptitle(title)
+    plt.tight_layout()
+    plt.show()
+
+def draw_comparison(G, H, nameG=None, nameH=None):
+    pos1 = nx.kamada_kawai_layout(G)
+    pos2 = nx.kamada_kawai_layout(H)
+    fig, axes = plt.subplots(1, 2, figsize=(14, 7))
+    hG, _ = cheeger_cut(G)
+    rhoG = se.spectral_radius(G)
+    hH, _ = cheeger_cut(H)
+    rhoH = se.spectral_radius(H)
+    axes[0].set_title(f"edgecount: {G.number_of_edges()}, cheeger: {hG:.4f}, s.r.: {rhoG:.4f}")
+    nx.draw(G, pos1, with_labels=True, node_color='lightblue', edge_color='black', ax=axes[0])
+    axes[1].set_title(f"edgecount: {H.number_of_edges()}, cheeger: {hH:.4f}, s.r.: {rhoH:.4f}")
+    nx.draw(H, pos2, with_labels=True, node_color='lightblue', edge_color='black', ax=axes[1])
+
+    plt.suptitle(f"{nameG} -> {nameH}")
     plt.tight_layout()
     plt.show()
 
 
-def visualize_kelmans_operation(G, u, v):
-    H = kelmans_op(G, u, v)
-    shiftable_edges = [(u, w) for w in G.neighbors(u) if w != v and w not in set(G.neighbors(v))]
-    non_shifted_edges = [(u, w) for w in G.neighbors(u) if w != v and (u, w) not in shiftable_edges]
-    if G.has_edge(u, v):
-        non_shifted_edges.append((u, v))
-    normal_edges = [e for e in G.edges() if u not in e]
-    
-    new_edges = [(v, w) for w in H.neighbors(v) if not G.has_edge(v, w) and not G.has_edge(w, v)]
-    H_normal_edges = [e for e in H.edges() if e not in new_edges and (e[1], e[0]) not in new_edges]
-    
-    pos_original = nx.kamada_kawai_layout(G)
-    pos_after = nx.kamada_kawai_layout(H)
-    
+def visualize_partitioned_cut(g, cut_set):
+    a_nodes = list(cut_set)
+    b_nodes = [v for v in g.nodes() if v not in cut_set]
+    a = g.subgraph(a_nodes)
+    b = g.subgraph(b_nodes)
+    pos = nx.spring_layout(g, seed=42)
+    pos_a = nx.spring_layout(a, seed=1)
+    pos_b = nx.spring_layout(b, seed=2)
+    offset = np.array([2.5, 0])
+    for key in pos_b:
+        pos_b[key] += offset
+    pos_split = {**pos_a, **pos_b}
+    cut_edges = [(u, v) for u, v in g.edges() if (u in cut_set) != (v in cut_set)]
+    internal_edges = [(u, v) for u, v in g.edges() if (u in cut_set) == (v in cut_set)]
+    h_global, _ = cheeger_cut(g)
+    rho_g = se.spectral_radius(g)
+    rho_a = se.spectral_radius(a) if a.number_of_nodes() > 1 else 0
+    rho_b = se.spectral_radius(b) if b.number_of_nodes() > 1 else 0
+    h_a, _ = cheeger_cut(a) if a.number_of_nodes() > 1 else (0, None)
+    h_b, _ = cheeger_cut(b) if b.number_of_nodes() > 1 else (0, None)
     fig, axes = plt.subplots(1, 2, figsize=(14, 6))
-    
     ax = axes[0]
-    ax.set_title("original")
-    node_colors = ['red' if n in [u, v] else 'lightblue' for n in G.nodes()]
-    nx.draw_networkx_nodes(G, pos_original, node_color=node_colors, ax=ax)
-    nx.draw_networkx_labels(G, pos_original, ax=ax)
-    nx.draw_networkx_edges(G, pos_original, edgelist=normal_edges, edge_color='gray', ax=ax)
-    nx.draw_networkx_edges(G, pos_original, edgelist=non_shifted_edges, edge_color='blue', ax=ax)
-    nx.draw_networkx_edges(G, pos_original, edgelist=shiftable_edges, edge_color='orange', style='dashed', ax=ax)
-    
+    nx.draw_networkx_nodes(g, pos, nodelist=a_nodes, node_color='skyblue', ax=ax)
+    nx.draw_networkx_nodes(g, pos, nodelist=b_nodes, node_color='lightgreen', ax=ax)
+    nx.draw_networkx_labels(g, pos, ax=ax)
+    nx.draw_networkx_edges(g, pos, edgelist=internal_edges, edge_color='gray', ax=ax)
+    nx.draw_networkx_edges(g, pos, edgelist=cut_edges, edge_color='red', width=1, ax=ax)
+    ax.set_title(f"global partition\nρ: {rho_g:.4f}, h: {h_global:.4f}\ncut edges: {len(cut_edges)}")
+    ax.axis('off')
     ax = axes[1]
-    ax.set_title("after kelmans op")
-    node_colors_H = ['red' if n in [u, v] else 'lightgreen' for n in H.nodes()]
-    nx.draw_networkx_nodes(H, pos_after, node_color=node_colors_H, ax=ax)
-    nx.draw_networkx_labels(H, pos_after, ax=ax)
-    nx.draw_networkx_edges(H, pos_after, edgelist=H_normal_edges, edge_color='gray', ax=ax)
-    nx.draw_networkx_edges(H, pos_after, edgelist=new_edges, edge_color='green', width=2, ax=ax)
-    
+    nx.draw_networkx_nodes(g, pos_split, nodelist=a_nodes, node_color='skyblue', ax=ax)
+    nx.draw_networkx_nodes(g, pos_split, nodelist=b_nodes, node_color='lightgreen', ax=ax)
+    nx.draw_networkx_labels(g, pos_split, ax=ax)
+    nx.draw_networkx_edges(g, pos_split, edgelist=internal_edges, edge_color='gray', ax=ax)
+    nx.draw_networkx_edges(g, pos_split, edgelist=cut_edges, edge_color='orange', style='dashed', width=1, ax=ax)
+    ax.set_title(f"individual partitions\nρ(a): {rho_a:.4f}, h(a): {h_a:.4f} | ρ(b): {rho_b:.4f}, h(b): {h_b:.4f}")
+    ax.axis('off')
+    plt.tight_layout()
+    plt.show()
+    return a, b
+
+def kelmans_op(g, u, v):
+    if not g.has_edge(u, v):
+        return g.copy()
+    h = g.copy()
+    for w in list(h.neighbors(u)):
+        if w != v and not h.has_edge(v, w):
+            h.add_edge(v, w)
+            h.remove_edge(u, w)
+    return h
+
+def visualize_kelmans_operation(g, u, v):
+    h = kelmans_op(g, u, v)
+    pos_orig = nx.kamada_kawai_layout(g)
+    pos_after = nx.kamada_kawai_layout(h)
+    fig, axes = plt.subplots(1, 2, figsize=(14, 6))
+    axes[0].set_title(f"original graph\nedges: {g.number_of_edges()}")
+    nx.draw(g, pos_orig, with_labels=True, node_color='lightblue', edge_color='gray', ax=axes[0])
+    axes[1].set_title(f"after kelmans\nedges: {h.number_of_edges()}\nspectral rad: {se.spectral_radius(h):.4f}")
+    nx.draw(h, pos_after, with_labels=True, node_color='lightgreen', edge_color='gray', ax=axes[1])
     plt.tight_layout()
     plt.show()
 
+def draw_spectral_embedding(g, method='fiedler'):
+    if method == 'fiedler':
+        data = se.fast_eigen_decomp(g)
+        fiedler = data.get("fiedler_vector")
+        if fiedler is None:
+            print("fiedler vector not available")
+            return
+        fiedler = fiedler.flatten()
+        plt.figure(figsize=(10, 5))
+        plt.scatter(range(len(fiedler)), fiedler, c='blue')
+        plt.xlabel("node index")
+        plt.ylabel("fiedler value")
+        plt.title("spectral embedding (fiedler vector)")
+        plt.grid(True)
+        plt.show()
+    else:
+        print(f"method '{method}' not implemented")
 
-def test_modifications(G):
-    groups = {"no changes": [], "isomorphic": [], "has_pendent_edge": [], "has_weak_edge": [], "is_disconnected": [], "other": []}
-    for u, v in combinations(G.nodes(), 2):
-        candidate = (u, v) if G.degree(u) > G.degree(v) else (v, u)
-        H = kelmans_op(G, candidate[0], candidate[1])
-        if edges_equal(G, H):
-            groups["no changes"].append(candidate)
-        elif nx.is_isomorphic(G, H):
-            groups["isomorphic"].append(candidate)
-        elif any(deg == 1 for _, deg in H.degree()):
-            groups["has_pendent_edge"].append(candidate)
-        elif list(nx.bridges(H)):
-            groups["has_weak_edge"].append(candidate)
-        elif not nx.is_connected(H):
-            groups["is_disconnected"].append(candidate)
-        else:
-            groups["other"].append(candidate)
-    for group, candidates in groups.items():
-        if group == "has_pendent_edge" or group == "has_weak_edge" or group=="is disconnected":
-            for candidate in candidates:
-                u,v = candidate
-                print(f"shift {u} -> {v}, modification type: {group}")
-                visualize_kelmans_operation(G, candidate[0], candidate[1])
-        else:
-            print(f"{group}: {candidates}")
-# need to add large graph drawing fct
+def draw_refinement_results(results):
+    for name, res in results.items():
+        h = res['graph']
+        cut = res['cut']
+        cheeger_val = res['cheeger']
+        rho = res['spectral_radius']
+        edge_count = res['edge_count']
+        fig, axes = plt.subplots(1, 2, figsize=(12, 5))
+        pos_orig = nx.kamada_kawai_layout(h)
+        pos_refined = nx.kamada_kawai_layout(h)
+        cut_edges = [(u, v) for u, v in h.edges() if (u in cut) != (v in cut)]
+        nx.draw(h, pos_orig, ax=axes[0], with_labels=True, node_color='lightblue', edge_color='gray')
+        nx.draw_networkx_edges(h, pos_orig, edgelist=cut_edges, edge_color='pink', width=1, ax=axes[0])
+        axes[0].set_title("refined graph (original view)")
+        axes[0].axis('off')
+        nx.draw(h, pos_refined, ax=axes[1], with_labels=True, node_color='lightgreen', edge_color='gray')
+        nx.draw_networkx_edges(h, pos_refined, edgelist=cut_edges, edge_color='orange', width=1, ax=axes[1])
+        axes[1].set_title(f"{name}\ncheeger ≈ {cheeger_val:.4f}, spectral rad ≈ {rho:.4f}, edges: {edge_count}")
+        axes[1].axis('off')
+        plt.tight_layout()
+        plt.show()
